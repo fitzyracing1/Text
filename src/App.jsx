@@ -45,7 +45,21 @@ Keep each part brief (1-2 sentences each).`;
   }
 }
 
+const MOCK_MODE = !import.meta.env.VITE_USE_API;
+
+const MOCK_RESPONSES = {
+  1: (msg) => `Got it — "${msg.slice(0, 30)}${msg.length > 30 ? "…" : ""}". Here's a direct, helpful reply to what you said.`,
+  2: (msg) => `Got it — "${msg.slice(0, 30)}${msg.length > 30 ? "…" : ""}". Here's a direct, helpful reply.\n→ Also worth knowing: this is something useful you didn't ask for but might find relevant.`,
+  3: (msg) => `Got it — "${msg.slice(0, 30)}${msg.length > 30 ? "…" : ""}". Here's a direct, helpful reply.\n→ Also worth knowing: something useful surfaced proactively for you.\n→→ Looking ahead: here's what you'll likely need next, already addressed.`,
+};
+
 async function callClaude(messages, level) {
+  if (MOCK_MODE) {
+    await new Promise((r) => setTimeout(r, 800 + Math.random() * 600));
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    return MOCK_RESPONSES[level](lastUser?.content || "");
+  }
+
   const response = await fetch("/api/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -165,7 +179,10 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ color: "#fff", fontSize: 13, letterSpacing: 3, textTransform: "uppercase" }}>AUTONOMY.AI</div>
-            <div style={{ color: "#555", fontSize: 10, marginTop: 2 }}>text-first · background-processing</div>
+            <div style={{ color: "#555", fontSize: 10, marginTop: 2 }}>
+              text-first · background-processing
+              {MOCK_MODE && <span style={{ color: "#444", marginLeft: 6 }}>· DEMO</span>}
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{
