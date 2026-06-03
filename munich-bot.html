@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MUNICH.BOT</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #050505; font-family: 'Courier New', monospace; }
+    @keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+    @keyframes pulse { 0%,100%{opacity:0.2;transform:scale(0.8)} 50%{opacity:1;transform:scale(1.2)} }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0a0a0a; }
+    ::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const CATEGORIES = [
+  { id: "news",      label: "NEWS",      icon: "◎", color: "#60a5fa" },
+  { id: "weather",   label: "WEATHER",   icon: "◈", color: "#34d399" },
+  { id: "events",    label: "EVENTS",    icon: "◇", color: "#f59e0b" },
+  { id: "transport", label: "TRANSPORT", icon: "◉", color: "#a78bfa" },
+];
+
+const INTERVAL_OPTIONS = [
+  { label: "15s", value: 15000 },
+  { label: "30s", value: 30000 },
+  { label: "60s", value: 60000 },
+  { label: "2m",  value: 120000 },
+];
+
+const NEWS_POOL = [
+  "◎ Isar flood warnings lifted as water levels normalize\nBavarian State Office confirms clean-up crews deployed along south bank near Thalkirchen.",
+  "◎ FC Bayern signs youth talent from 1860 München academy\nThe 19-year-old midfielder joins first-team training ahead of Bundesliga restart in January.",
+  "◎ Oktoberfest 2026 tent permits under city council review\nMayor Reiter signals stricter sustainability requirements; decisions expected by March.",
+  "◎ New U5 extension opens trial runs to Pasing Arcaden\nMVG confirms full public service begins after final safety inspections this week.",
+  "◎ Marienplatz Christmas market draws record visitor numbers\nOver 2.1 million visitors logged in first three weeks; city extends hours by one hour.",
+  "◎ Gasteig HP8 wins European architecture prize\nThe renovated cultural complex praised for acoustic design and riverside integration.",
+];
+
+const WEATHER_POOL = [
+  "11°C · Overcast · Wind 14 km/h from the northwest\nExpect drizzle through the afternoon; temperatures rising to 14°C by evening with clearing skies.",
+  "16°C · Partly sunny · Wind 8 km/h southwest\nPleasant Föhn conditions bringing clear Alpine views; slight chance of thunderstorm after 20:00.",
+  "3°C · Light snow · Wind 22 km/h northeast\nSnow accumulation of 2–4 cm expected by midnight; Autobahn A8 south advisory in effect.",
+  "8°C · Foggy · Wind calm\nFog patches lingering until noon, then lifting to reveal autumn sunshine; perfect Englischer Garten conditions.",
+  "19°C · Sunny · Wind 11 km/h\nWarm for the season — bring sunscreen to the Viktualienmarkt; Biergärten reopening early.",
+];
+
+const EVENTS_POOL = [
+  "◇ Munich Philharmonic · Gasteig HP8 · 20:00 · Mahler Symphony No. 5 conducted by Lahav Shani.\n◇ Street Food Market · Wittelsbacherplatz · 11:00–22:00 · 40+ international vendors including Korean, Lebanese, and Bavarian.\n◇ Glyptothek Night · Königsplatz · 19:00 · Special evening access to Greek and Roman sculptures with live guitar.",
+  "◇ Tollwood Winter Festival · Olympiapark · All day · World music, art installations, and organic food village.\n◇ BMW Museum Tour · BMW Welt · 10:00 & 14:00 · Behind-the-scenes factory access included with booking.\n◇ Comedy Night · Lustspielhaus · 21:00 · Sold-out show; last-minute tickets may appear at door.",
+  "◇ Christkindlmarkt · Marienplatz · 10:00–21:00 · Traditional stalls, Glühwein, and Bavarian crafts under the Rathaus.\n◇ FC Bayern vs. Dortmund · Allianz Arena · 18:30 · Bundesliga top-of-table clash; sold out.\n◇ Jazz at Jazzclub Unterfahrt · Einstein Kulturzentrum · 20:30 · Danish quartet, free entry before 21:00.",
+];
+
+const TRANSPORT_POOL = [
+  "U-Bahn: Normal operations on all lines.\nS-Bahn: Delays 8–12 min on S3 Pasing–Ostbahnhof · signal fault at Rosenheimer Platz.\nTram: 16 running on bus replacement between Stachus and Sendlinger Tor · track maintenance.",
+  "U-Bahn: U6 delayed 5 min southbound · increased passenger load · Marienplatz to Sendlinger Tor.\nS-Bahn: All lines normal.\nTram: Normal operations on all routes.",
+  "U-Bahn: All lines running normally.\nS-Bahn: S1 airport service suspended · engineering works · replacement bus via A92.\nTram: 17 and 19 diverted via Karlsplatz · road closure Maximilianstraße.",
+  "U-Bahn: All lines normal.\nS-Bahn: All lines normal.\nTram: All routes operating on schedule. Minor crowding expected around Oktoberfest grounds.",
+];
+
+const POOLS = { news: NEWS_POOL, weather: WEATHER_POOL, events: EVENTS_POOL, transport: TRANSPORT_POOL };
+
+const API_KEY = window.__MUNICH_API_KEY || "";
+
+const PROMPTS = {
+  news:      "Give me 3 very brief breaking news items about Munich, Germany. Each: headline (max 8 words) starting with ◎ + one sentence detail. Be specific with real Munich locations.",
+  weather:   "Give current Munich weather: temperature °C, conditions, wind speed, one-sentence 6-hour forecast. Be specific.",
+  events:    "List 3 events in Munich today. Format: ◇ event · venue · time · one sentence. Use real Munich venues.",
+  transport: "Munich public transport status. Cover U-Bahn, S-Bahn, tram. One line each: normal or issue + which lines + brief reason.",
+};
+
+async function fetchMunich(catId) {
+  if (!API_KEY) {
+    await new Promise(r => setTimeout(r, 700 + Math.random() * 900));
+    const pool = POOLS[catId];
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      system: "You are a real-time Munich city intelligence feed. Be concise, specific, factual-sounding. No disclaimers.",
+      messages: [{ role: "user", content: PROMPTS[catId] }],
+    }),
+  });
+  const data = await res.json();
+  return data.content?.map(b => b.text || "").join("") || "No data.";
+}
+
+function fmt(d) {
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function FeedEntry({ entry, color }) {
+  return (
+    <div style={{ borderLeft: `2px solid ${color}`, paddingLeft: 12, marginBottom: 20 }}>
+      <div style={{ fontSize: 9, color: "#444", letterSpacing: 1, marginBottom: 4 }}>
+        {fmt(entry.ts)} · {entry.ok ? "LIVE" : "ERR"}
+      </div>
+      <div style={{ color: entry.ok ? "#d4d4d4" : "#f87171", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+        {entry.text}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [active, setActive] = useState("news");
+  const [feeds, setFeeds] = useState({ news: [], weather: [], events: [], transport: [] });
+  const [busy, setBusy]   = useState({ news: false, weather: false, events: false, transport: false });
+  const [running, setRunning] = useState(true);
+  const [ms, setMs]       = useState(30000);
+  const [cd, setCd]       = useState(30);
+  const [showKey, setShowKey] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const timerRef = useRef(null);
+  const cdRef    = useRef(null);
+  const feedRef  = useRef(null);
+
+  const search = useCallback(async (catId) => {
+    setBusy(b => ({ ...b, [catId]: true }));
+    try {
+      const text = await fetchMunich(catId);
+      setFeeds(f => ({ ...f, [catId]: [{ text, ts: new Date(), ok: true }, ...f[catId]].slice(0, 20) }));
+    } catch {
+      setFeeds(f => ({ ...f, [catId]: [{ text: "Search failed — retrying next cycle.", ts: new Date(), ok: false }, ...f[catId]].slice(0, 20) }));
+    }
+    setBusy(b => ({ ...b, [catId]: false }));
+  }, []);
+
+  const searchAll = useCallback(() => CATEGORIES.forEach(c => search(c.id)), [search]);
+
+  useEffect(() => { searchAll(); }, []);
+
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    clearInterval(cdRef.current);
+    if (!running) return;
+    setCd(Math.ceil(ms / 1000));
+    timerRef.current = setInterval(() => { searchAll(); setCd(Math.ceil(ms / 1000)); }, ms);
+    cdRef.current    = setInterval(() => setCd(c => c > 1 ? c - 1 : Math.ceil(ms / 1000)), 1000);
+    return () => { clearInterval(timerRef.current); clearInterval(cdRef.current); };
+  }, [running, ms, searchAll]);
+
+  useEffect(() => { feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [active]);
+
+  const cat  = CATEGORIES.find(c => c.id === active);
+  const feed = feeds[active];
+  const isLoading = busy[active];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", flexDirection: "column", alignItems: "center" }}>
+
+      {/* Header */}
+      <div style={{ width: "100%", maxWidth: 520, background: "#0d0d0d", borderBottom: "1px solid #1a1a1a", padding: "14px 20px 12px", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div>
+            <div style={{ color: "#fff", fontSize: 13, letterSpacing: 3 }}>MUNICH.BOT</div>
+            <div style={{ color: "#555", fontSize: 9, marginTop: 2, letterSpacing: 1 }}>
+              LIVE CITY INTELLIGENCE
+              {!API_KEY && <span style={{ color: "#333", marginLeft: 6 }}>· DEMO</span>}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {/* API key button */}
+            <button onClick={() => setShowKey(s => !s)} style={{ background: API_KEY ? "#0a1a0a" : "transparent", border: `1px solid ${API_KEY ? "#1a3a1a" : "#1a1a1a"}`, borderRadius: 4, color: API_KEY ? "#4ade80" : "#333", fontSize: 9, padding: "3px 8px", cursor: "pointer", letterSpacing: 1 }}>
+              {API_KEY ? "KEY ✓" : "ADD KEY"}
+            </button>
+            {/* Interval */}
+            <div style={{ display: "flex", gap: 3 }}>
+              {INTERVAL_OPTIONS.map(opt => (
+                <button key={opt.value} onClick={() => setMs(opt.value)} style={{ background: ms === opt.value ? "#1a1a1a" : "transparent", border: `1px solid ${ms === opt.value ? "#333" : "#1a1a1a"}`, borderRadius: 4, color: ms === opt.value ? "#888" : "#333", fontSize: 9, padding: "3px 6px", cursor: "pointer" }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {/* Run/Pause */}
+            <button onClick={() => setRunning(r => !r)} style={{ background: running ? "#1a1a1a" : "#0f1a0f", border: `1px solid ${running ? "#333" : "#1a3a1a"}`, borderRadius: 6, color: running ? "#f87171" : "#4ade80", fontSize: 9, padding: "4px 10px", cursor: "pointer", letterSpacing: 1.5 }}>
+              {running ? "PAUSE" : "RUN"}
+            </button>
+          </div>
+        </div>
+
+        {/* API key input */}
+        {showKey && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <input
+              type="password"
+              placeholder="sk-ant-…  (optional — enables live Claude results)"
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              style={{ flex: 1, background: "#111", border: "1px solid #333", borderRadius: 4, color: "#d4d4d4", fontSize: 10, padding: "5px 8px", outline: "none", fontFamily: "inherit" }}
+            />
+            <button
+              onClick={() => { window.__MUNICH_API_KEY = keyInput; setShowKey(false); searchAll(); }}
+              style={{ background: "#1a2a1a", border: "1px solid #2a4a2a", borderRadius: 4, color: "#4ade80", fontSize: 9, padding: "5px 10px", cursor: "pointer" }}
+            >
+              SET
+            </button>
+          </div>
+        )}
+
+        {/* Category tabs */}
+        <div style={{ display: "flex", gap: 6 }}>
+          {CATEGORIES.map(c => (
+            <button key={c.id} onClick={() => setActive(c.id)} style={{ flex: 1, background: active === c.id ? `${c.color}18` : "transparent", border: `1px solid ${active === c.id ? c.color : "#222"}`, borderRadius: 6, padding: "6px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, transition: "all 0.2s" }}>
+              <span style={{ fontSize: 14, color: active === c.id ? c.color : "#444" }}>{c.icon}</span>
+              <span style={{ fontSize: 8, color: active === c.id ? c.color : "#444", letterSpacing: 1.5 }}>{c.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div style={{ width: "100%", maxWidth: 520, padding: "6px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #111", background: "#080808" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: isLoading ? cat.color : (running ? "#333" : "#1a1a1a"), boxShadow: isLoading ? `0 0 6px ${cat.color}` : "none", animation: isLoading ? "blink 0.8s infinite" : "none" }} />
+          <span style={{ fontSize: 9, color: "#444", letterSpacing: 1 }}>
+            {isLoading ? `SEARCHING ${cat.label}…` : `${feed.length} RESULT${feed.length !== 1 ? "S" : ""}`}
+          </span>
+        </div>
+        {running
+          ? <span style={{ fontSize: 9, color: "#333", letterSpacing: 0.5 }}>NEXT IN {cd}s</span>
+          : <span style={{ fontSize: 9, color: "#333", letterSpacing: 1 }}>PAUSED</span>
+        }
+      </div>
+
+      {/* Feed */}
+      <div ref={feedRef} style={{ width: "100%", maxWidth: 520, flex: 1, padding: "20px 20px 40px", overflowY: "auto", minHeight: "calc(100vh - 200px)" }}>
+        {feed.length === 0 && !isLoading && (
+          <div style={{ textAlign: "center", color: "#222", fontSize: 11, paddingTop: 80, letterSpacing: 1 }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>{cat.icon}</div>
+            <div>WAITING FOR DATA…</div>
+          </div>
+        )}
+        {feed.length === 0 && isLoading && (
+          <div style={{ textAlign: "center", paddingTop: 80 }}>
+            <div style={{ color: cat.color, fontSize: 32, marginBottom: 12, animation: "blink 0.8s infinite" }}>{cat.icon}</div>
+            <div style={{ color: "#444", fontSize: 10, letterSpacing: 2 }}>FETCHING LIVE DATA…</div>
+          </div>
+        )}
+        {feed.map((entry, i) => (
+          <FeedEntry key={i} entry={entry} color={i === 0 ? cat.color : "#1e1e1e"} />
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div style={{ width: "100%", maxWidth: 520, borderTop: "1px solid #111", padding: "8px 20px", display: "flex", gap: 16, justifyContent: "center", background: "#080808" }}>
+        {CATEGORIES.map(c => (
+          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ width: 5, height: 5, borderRadius: "50%", background: busy[c.id] ? c.color : "#1a1a1a", boxShadow: busy[c.id] ? `0 0 4px ${c.color}` : "none", transition: "all 0.3s" }} />
+            <span style={{ fontSize: 8, color: busy[c.id] ? c.color : "#2a2a2a", letterSpacing: 1 }}>{c.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
