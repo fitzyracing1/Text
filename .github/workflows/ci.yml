@@ -1,0 +1,32 @@
+# Minimal CI added on the throwaway branch try/service-launch (commit-live service trial).
+name: CI
+
+on:
+  push:
+    branches: [main, 'try/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install
+        run: npm ci --no-audit --no-fund
+      - name: syntax check
+        run: node --check server.js
+      - name: build
+        run: npm run build
+      - name: smoke start (8s, must still be running)
+        run: |
+          set +e
+          PORT=3999 timeout 8 node server.js
+          rc=$?
+          if [ $rc -eq 124 ]; then echo 'still running after 8s - ok'; else echo "exited early with $rc"; exit 1; fi
